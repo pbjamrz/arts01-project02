@@ -7,9 +7,12 @@ let heartScale = 1;
 let tension = 0;
 let targetTension = 0;
 let heartbeatPhase = 0;
+let lastBeatTime = 0;
+let beatInterval = 2000;
 
 function draw() {
-  background(30);
+  let bgBrightness = 20 + tension * 15;
+  background(bgBrightness, bgBrightness - 5, bgBrightness + 5);
 
   // update tension
   // 0 = loose, 1 = tight, 2+ = breaking
@@ -18,10 +21,37 @@ function draw() {
     targetTension = max(0, targetTension - 0.02);
   }
 
-  // heartbeat animation
-  heartbeatPhase += 0.05 + tension * 0.1;
-  let beat = sin(heartbeatPhase) * 0.05 * (1 + tension * 0.5);
-  heartScale = 1 + beat;
+  // heartbeat timing based on tension
+  // low tension = slow dying beats (2000ms)
+  // high tension = rapid panicked beats (400ms)
+  beatInterval = map(tension, 0, 2, 2000, 400);
+
+  let currentTime = millis();
+  if (currentTime - lastBeatTime > beatInterval) {
+    lastBeatTime = currentTime;
+    heartbeatPhase = 0; // reset beat cycle
+  }
+
+  // natural heartbeat: quick contraction, slower relaxation
+  let beatProgress = (currentTime - lastBeatTime) / beatInterval;
+  let beat;
+
+  if (beatProgress < 0.15) {
+    // Quick contraction (systole)
+    beat = sin(beatProgress * PI / 0.15) * 0.15;
+  } else if (beatProgress < 0.35) {
+    // Quick relaxation
+    beat = sin((beatProgress - 0.15) * PI / 0.2 + PI) * 0.08;
+  } else {
+    // Rest period (diastole)
+    beat = 0;
+  }
+
+  // scale increases with tension
+  let beatAmplitude = 0.08 + tension * 0.475;
+  heartScale = 1 + beat * beatAmplitude;
+
+  drawAmbientGlow();
 
   push();
   translate(width / 2, height / 2);
@@ -30,10 +60,34 @@ function draw() {
   drawRosary();
   pop();
 
-  // Debug info
+  // debug info
   fill(255);
   textSize(12);
-  text(`Tension: ${tension.toFixed(2)} | Click to increase`, 10, 20);
+  text(`Tension: ${tension.toFixed(2)} | Interval: ${beatInterval.toFixed(0)}ms | Click to increase`, 10, 20);
+}
+
+// ambient lighting and glow
+function drawAmbientGlow() {
+  push();
+  translate(width / 2, height / 2);
+
+  // dull red glow that intensifies with tension
+  let glowAlpha = 5 + tension * 20;
+  let glowSize = 400 + tension * 200;
+
+  // outer glow
+  for (let i = 4; i > 0; i--) {
+    fill(139, 0, 23, glowAlpha * (i / 4));
+    noStroke();
+    ellipse(0, 0, glowSize * (i / 4), glowSize * (i / 4));
+  }
+
+  // pulsing light with heartbeat
+  let pulseAlpha = glowAlpha * 0.5 * heartScale;
+  fill(200, 50, 60, pulseAlpha);
+  ellipse(0, 0, 300, 300);
+
+  pop();
 }
 
 function mousePressed() {
@@ -42,12 +96,12 @@ function mousePressed() {
 
 // --------- HEART --------- //
 function drawHeart() {
-  // colors
-  let base = color("#6d0017");     // deep crimson
-  let mid = color("#8a002272");     // mid red
-  let glow = color(255, 60, 80, 20); // faint pulse halo
+  // colors - get brighter with tension
+  let brightness = tension * 15;
+  let base = color(109 + brightness, 0, 23 + brightness);
+  let mid = color(138 + brightness, 0, 34 + brightness, 114);
 
-  // main shape ---------
+  // main shape 
   push();
   noStroke();
   fill(base);
@@ -58,7 +112,7 @@ function drawHeart() {
   endShape(CLOSE);
   pop();
 
-  // inner shading ---------
+  // inner coloring 
   push();
   noStroke();
   fill(mid);
@@ -69,10 +123,21 @@ function drawHeart() {
   endShape(CLOSE);
   pop();
 
-  // highlight ---------
+  // glow
   push();
   noStroke();
-  fill(255, 10); // translucent white
+  fill(255, 60, 80, 10 + tension * 15);
+  beginShape();
+  vertex(0, -135);
+  bezierVertex(105, -205, 225, -45, 0, 165);
+  bezierVertex(-225, -45, -105, -205, 0, -135);
+  endShape(CLOSE);
+  pop();
+
+  // highlight
+  push();
+  noStroke();
+  fill(255, 10 + tension * 5);
   ellipse(-50, -50, 30, 50);
   pop();
 }
@@ -104,11 +169,11 @@ function drawRosary() {
 
       let x, y;
       if (strand === 0) {
-        // Top-left to bottom-right
+        // top-left to bot-right
         x = map(t, 0, 1, -130, 100);
         y = map(t, 0, 1, -110, 80);
       } else {
-        // Top-right to bottom-left
+        // top-right to bot-left
         x = map(t, 0, 1, 130, -100);
         y = map(t, 0, 1, -110, 80);
       }
@@ -125,11 +190,11 @@ function drawRosary() {
 
       let x, y;
       if (strand === 0) {
-        // Top-left to bottom-right
+        // top-left to bot-right
         x = map(t, 0, 1, -120, 90);
         y = map(t, 0, 1, -100, 70);
       } else {
-        // Top-right to bottom-left
+        // top-right to bot-left
         x = map(t, 0, 1, 120, -90);
         y = map(t, 0, 1, -100, 70);
       }
@@ -147,7 +212,7 @@ function drawRosary() {
       fill(50);
       ellipse(x + 2, y + 2, beadSize, beadSize);
 
-      // main bead
+      // bead base
       fill(beadColor);
       ellipse(x, y, beadSize, beadSize);
 
@@ -190,23 +255,16 @@ function drawRosary() {
     ellipse(x - beadSize * 0.2, y - beadSize * 0.2, beadSize * 0.1, beadSize * 0.1);
   }
 
-  // cross 
+  // cross ---------
   push();
   translate(0, 120);
 
-  // cross glow
-  fill(150, 150, 170, 30);
-  noStroke();
-  ellipse(0, 0, 40, 40);
-
-  // vert beam
+  // cross base
   fill(100, 100, 120);
   rect(-3, -15, 6, 30);
-
-  // horiz beam
   rect(-10, -5, 20, 6);
 
-  // highlight
+  // cross highlight
   fill(150, 150, 170);
   rect(-2, -15, 2, 28);
 
@@ -217,7 +275,7 @@ function drawRosary() {
 // --------- ANIMATION: ROSARY BREAKING --------- //
 let scatteredBeads = [];
 function drawBreakingRosary() {
-  // Initialize scattered beads once
+  // initialize scattered beads once
   if (scatteredBeads.length === 0) {
     for (let i = 0; i < 50; i++) {
       let angle = random(TWO_PI);
@@ -227,12 +285,12 @@ function drawBreakingRosary() {
         vx: cos(angle) * random(3, 10),
         vy: sin(angle) * random(3, 10) - 2,
         size: i % 6 === 0 ? 12 : 7,
-        life: 1.0
+        life: 10.0
       });
     }
   }
 
-  // Update and draw scattered beads
+  // draw and update scattering beads
   noStroke();
   for (let bead of scatteredBeads) {
     bead.x += bead.vx;
@@ -246,10 +304,10 @@ function drawBreakingRosary() {
     }
   }
 
-  // Cross falls and spins
+  // cross falling
   if (scatteredBeads[0].life > 0) {
     push();
-    translate(0, 190 + (1 - scatteredBeads[0].life) * 300);
+    translate(0, 120);
     rotate((1 - scatteredBeads[0].life) * TWO_PI);
     fill(100, 100, 120, scatteredBeads[0].life * 255);
     rect(-3, -15, 6, 30);
