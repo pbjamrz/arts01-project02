@@ -1,6 +1,37 @@
+function preload() {
+  soundFormats('mp3', 'wav');
+  try {
+    heartbeatSound = loadSound('assets/heartbeat.mp3');
+    breakSound = loadSound('assets/break.mp3');
+    myFont = loadFont('assets/deutsch.ttf');
+  } catch (e) {
+    console.log('Sound files not loaded - continuing without assets');
+  }
+}
+
 function setup() {
   createCanvas(windowWidth, windowHeight);
   noStroke();
+
+  // Create reset button - positioned at center top where instruction text was
+  resetButton = createButton('Reset');
+  resetButton.position(10, 10);
+  resetButton.mousePressed(resetArtwork);
+  resetButton.style('padding', '10px 20px');
+  resetButton.style('font-size', '18px');
+  resetButton.style('font-family', 'Helvetica');
+  resetButton.style('background-color', '#8a0022');
+  resetButton.style('color', 'white');
+  resetButton.style('border', 'none');
+  resetButton.style('cursor', 'pointer');
+  resetButton.style('border-radius', '5px');
+  resetButton.hide(); // Hide until freedom state
+
+  // Start ambient sound
+  if (ambientOppressed && ambientOppressed.isLoaded()) {
+    ambientOppressed.loop();
+    ambientOppressed.setVolume(0.3);
+  }
 }
 
 let heartScale = 1;
@@ -10,45 +41,102 @@ let heartbeatPhase = 0;
 let lastBeatTime = 0;
 let beatInterval = 2000;
 
+// states
+let artworkState = 'oppressed'; // 'oppressed', 'breaking', 'whiteFlash', 'fadeIn', 'freedom'
+let freedomTime = 0;
+let resetButton;
+let breakingStartTime = 0;
+let whiteFlashStart = 0;
+let fadeInStart = 0; // NEW: track fade in timing
+
+// sound
+let heartbeatSound;
+let ambientOppressed;
+let ambientFreedom;
+let breakSound;
+
+let myFont;
+
 function draw() {
+  // Handle state transitions
+  if (artworkState === 'oppressed' || artworkState === 'breaking') {
+    drawOppressedState();
+  } else if (artworkState === 'whiteFlash') {
+    drawWhiteFlash();
+  } else if (artworkState === 'fadeIn') {
+    drawFadeIn();
+  } else if (artworkState === 'freedom') {
+    drawFreedomState();
+  }
+
+  // instruction
+  if (artworkState === 'oppressed' || artworkState === 'breaking') {
+    fill(255);
+    textSize(48);
+    textAlign(CENTER, CENTER);
+    textFont(myFont);
+    text("Click mouse to break free", width / 2, height / 2 - 300);
+  }
+
+  // credits
+  fill(artworkState === 'freedom' || artworkState === 'fadeIn' ? 0 : 255);
+  textAlign(LEFT, BASELINE);
+  textFont('Helvetica');
+  textSize(11);
+  text("Sound effects by BRVHRTZ, DRAGON-STUDIO from Pixabay", 10, height - 10);
+}
+
+function drawOppressedState() {
   let bgBrightness = 20 + tension * 15;
   background(bgBrightness, bgBrightness - 5, bgBrightness + 5);
 
-  // update tension
-  // 0 = loose, 1 = tight, 2+ = breaking
-  tension = lerp(tension, targetTension, 0.1);
-  if (!mouseIsPressed) {
-    targetTension = max(0, targetTension - 0.02);
+  // Only update tension if not in breaking state
+  if (artworkState !== 'breaking') {
+    tension = lerp(tension, targetTension, 0.1);
+    if (!mouseIsPressed) {
+      targetTension = max(0, targetTension - 0.02);
+    }
+  }
+
+  // Check if breaking threshold reached
+  if (tension > 2 && artworkState === 'oppressed') {
+    artworkState = 'breaking';
+    breakingStartTime = millis();
+    scatteredBeads = [];
+    fallingCross = null;
+    if (breakSound && breakSound.isLoaded()) {
+      breakSound.play();
+    }
   }
 
   // heartbeat timing based on tension
-  // low tension = slow dying beats (2000ms)
-  // high tension = rapid panicked beats (400ms)
-  beatInterval = map(tension, 0, 2, 2000, 400);
+  let effectiveTension = artworkState === 'breaking' ? 2 : tension;
+  beatInterval = map(effectiveTension, 0, 2, 2000, 400);
 
   let currentTime = millis();
   if (currentTime - lastBeatTime > beatInterval) {
     lastBeatTime = currentTime;
-    heartbeatPhase = 0; // reset beat cycle
+    heartbeatPhase = 0;
+
+    // Play heartbeat sound
+    if (heartbeatSound && heartbeatSound.isLoaded) {
+      heartbeatSound.play();
+      heartbeatSound.setVolume(map(effectiveTension, 0, 2, 0.3, 0.8));
+    }
   }
 
-  // natural heartbeat: quick contraction, slower relaxation
   let beatProgress = (currentTime - lastBeatTime) / beatInterval;
   let beat;
 
   if (beatProgress < 0.15) {
-    // Quick contraction (systole)
     beat = sin(beatProgress * PI / 0.15) * 0.15;
   } else if (beatProgress < 0.35) {
-    // Quick relaxation
     beat = sin((beatProgress - 0.15) * PI / 0.2 + PI) * 0.08;
   } else {
-    // Rest period (diastole)
     beat = 0;
   }
 
-  // scale increases with tension
-  let beatAmplitude = 0.08 + tension * 0.475;
+  let beatAmplitude = 0.08 + effectiveTension * 0.475;
   heartScale = 1 + beat * beatAmplitude;
 
   drawAmbientGlow();
@@ -57,16 +145,327 @@ function draw() {
   translate(width / 2, height / 2);
   scale(heartScale);
   drawHeart();
-  drawRosary();
-  pop();
 
-  // debug info
-  fill(255);
-  textSize(12);
-  text(`Tension: ${tension.toFixed(2)} | Interval: ${beatInterval.toFixed(0)}ms | Click to increase`, 10, 20);
+  if (artworkState === 'breaking') {
+    drawBreakingRosary();
+    // Wait 3 seconds then trigger white flash
+    if (millis() - breakingStartTime > 3000) {
+      artworkState = 'whiteFlash';
+      whiteFlashStart = millis();
+    }
+  } else {
+    drawRosary();
+  }
+  pop();
 }
 
-// ambient lighting and glow
+// Simple white flash state
+function drawWhiteFlash() {
+  let elapsed = millis() - whiteFlashStart;
+  let flashDuration = 1200; // Slightly shorter since we have fade-in now
+
+  if (elapsed < flashDuration * 0.5) {
+    // Fade to white
+    let whiteness = map(elapsed, 0, flashDuration * 0.5, 20, 255);
+    background(whiteness);
+  } else if (elapsed < flashDuration) {
+    // Hold white
+    background(255);
+  } else {
+    // Switch to fade-in state
+    artworkState = 'fadeIn';
+    fadeInStart = millis();
+
+    // Switch ambient sound
+    if (ambientOppressed && ambientOppressed.isLoaded()) {
+      ambientOppressed.stop();
+    }
+    if (ambientFreedom && ambientFreedom.isLoaded()) {
+      ambientFreedom.loop();
+      ambientFreedom.setVolume(0.4);
+    }
+  }
+}
+
+// NEW: Gradual fade-in to freedom state
+function drawFadeIn() {
+  let elapsed = millis() - fadeInStart;
+  let fadeInDuration = 2000; // 2 seconds fade-in
+  let progress = constrain(elapsed / fadeInDuration, 0, 1);
+
+  // Ease out for smoother feel
+  let easedProgress = 1 - pow(1 - progress, 3);
+
+  // Background fades from white to freedom color
+  let bg = lerpColor(color(255), color(245, 235, 240), easedProgress);
+  background(bg);
+
+  // Heartbeat (calm)
+  let currentTime = millis();
+  beatInterval = 800;
+
+  if (currentTime - lastBeatTime > beatInterval) {
+    lastBeatTime = currentTime;
+    if (heartbeatSound && heartbeatSound.isLoaded()) {
+      heartbeatSound.play();
+      heartbeatSound.setVolume(0.5 * easedProgress);
+    }
+  }
+
+  let beatProgress = (currentTime - lastBeatTime) / beatInterval;
+  let beat;
+  if (beatProgress < 0.15) {
+    beat = sin(beatProgress * PI / 0.15) * 0.15;
+  } else if (beatProgress < 0.35) {
+    beat = sin((beatProgress - 0.15) * PI / 0.2 + PI) * 0.08;
+  } else {
+    beat = 0;
+  }
+  heartScale = 1 + beat * 0.15 * easedProgress;
+
+  // Fade in rays first (they're in the background)
+  if (easedProgress > 0.1) {
+    let rayAlpha = map(easedProgress, 0.1, 0.7, 0, 1);
+    rayAlpha = constrain(rayAlpha, 0, 1);
+    drawSpiralRainbowRays(rayAlpha);
+  }
+
+  // Fade in glow
+  if (easedProgress > 0.2) {
+    let glowAlpha = map(easedProgress, 0.2, 0.8, 0, 1);
+    glowAlpha = constrain(glowAlpha, 0, 1);
+    drawFreedomGlow(glowAlpha);
+  }
+
+  // Fade in heart
+  if (easedProgress > 0.3) {
+    let heartAlpha = map(easedProgress, 0.3, 1, 0, 1);
+    heartAlpha = constrain(heartAlpha, 0, 1);
+
+    push();
+    translate(width / 2, height / 2);
+    scale(heartScale);
+    drawHealthyHeartWithAlpha(heartAlpha);
+    pop();
+  }
+
+  // Transition complete
+  if (progress >= 1) {
+    artworkState = 'freedom';
+    freedomTime = millis();
+    resetButton.show();
+  }
+}
+
+function drawFreedomState() {
+  background(245, 235, 240);
+
+  // healthy heartbeat
+  let currentTime = millis();
+  beatInterval = 800; // Calm, steady beat
+
+  if (currentTime - lastBeatTime > beatInterval) {
+    lastBeatTime = currentTime;
+    if (heartbeatSound && heartbeatSound.isLoaded()) {
+      heartbeatSound.play();
+      heartbeatSound.setVolume(0.5);
+    }
+  }
+
+  let beatProgress = (currentTime - lastBeatTime) / beatInterval;
+  let beat;
+  if (beatProgress < 0.15) {
+    beat = sin(beatProgress * PI / 0.15) * 0.15;
+  } else if (beatProgress < 0.35) {
+    beat = sin((beatProgress - 0.15) * PI / 0.2 + PI) * 0.08;
+  } else {
+    beat = 0;
+  }
+  heartScale = 1 + beat * 0.15;
+
+  drawSpiralRainbowRays(1);
+  drawFreedomGlow(1);
+
+  // healthy heart
+  push();
+  translate(width / 2, height / 2);
+  scale(heartScale);
+  drawHealthyHeart();
+  pop();
+}
+
+// NEW: Spiral rainbow rays (no red)
+function drawSpiralRainbowRays(alpha) {
+  push();
+  translate(width / 2, height / 2);
+
+  // Rainbow colors without red: orange, yellow, green, cyan, blue, violet
+  let rainbowColors = [
+    color(255, 165, 0),   // orange
+    color(255, 220, 50),  // yellow
+    color(100, 200, 100), // green
+    color(50, 200, 200),  // cyan
+    color(100, 150, 255), // blue
+    color(180, 100, 255)  // violet
+  ];
+
+  let numRays = 6;
+  let time = millis() * 0.0003; // Slow rotation
+
+  for (let i = 0; i < numRays; i++) {
+    let baseAngle = (TWO_PI / numRays) * i + time;
+    let nextAngle = (TWO_PI / numRays) * (i + 1) + time;
+
+    let col = rainbowColors[i % rainbowColors.length];
+
+    // Draw filled wedge with spiral curve
+    noStroke();
+    fill(red(col), green(col), blue(col), 40 * alpha);
+
+    beginShape();
+    vertex(0, 0);
+
+    // Spiral edge 1
+    for (let r = 0; r <= 1; r += 0.05) {
+      let dist = r * max(width, height);
+      let spiralOffset = r * 0.3; // Spiral amount
+      let angle = baseAngle + spiralOffset;
+      let x = cos(angle) * dist;
+      let y = sin(angle) * dist;
+      vertex(x, y);
+    }
+
+    // Outer arc
+    let maxDist = max(width, height);
+    for (let a = 0; a <= 1; a += 0.1) {
+      let angle = lerp(baseAngle + 0.3, nextAngle + 0.3, a);
+      vertex(cos(angle) * maxDist, sin(angle) * maxDist);
+    }
+
+    // Spiral edge 2 (back to center)
+    for (let r = 1; r >= 0; r -= 0.05) {
+      let dist = r * max(width, height);
+      let spiralOffset = r * 0.3;
+      let angle = nextAngle + spiralOffset;
+      let x = cos(angle) * dist;
+      let y = sin(angle) * dist;
+      vertex(x, y);
+    }
+
+    endShape(CLOSE);
+  }
+
+  pop();
+}
+
+// Freedom glow with alpha parameter
+function drawFreedomGlow(alpha) {
+  push();
+  translate(width / 2, height / 2);
+
+  // Warm golden glow
+  for (let i = 5; i > 0; i--) {
+    fill(255, 215, 100, 8 * (i / 5) * alpha);
+    noStroke();
+    ellipse(0, 0, 500 * (i / 5), 500 * (i / 5));
+  }
+
+  // Inner bright glow
+  fill(255, 240, 200, (30 + sin(millis() * 0.002) * 10) * alpha);
+  ellipse(0, 0, 350, 350);
+
+  pop();
+}
+
+function drawTransformingHeart(heartColor, progress) {
+  noStroke();
+  fill(heartColor);
+  beginShape();
+  vertex(0, -130);
+  bezierVertex(100, -200, 220, -40, 0, 160);
+  bezierVertex(-220, -40, -100, -200, 0, -130);
+  endShape(CLOSE);
+
+  // Glow
+  fill(red(heartColor), green(heartColor), blue(heartColor), 30 + progress * 30);
+  beginShape();
+  vertex(0, -135);
+  bezierVertex(105, -205, 225, -45, 0, 165);
+  bezierVertex(-225, -45, -105, -205, 0, -135);
+  endShape(CLOSE);
+
+  // Highlight
+  fill(255, 100 + progress * 100);
+  ellipse(-50, -50, 30, 50);
+}
+
+function drawHealthyHeart() {
+  let base = color(255, 59, 71);
+  let highlight = color(255, 150, 150);
+
+  noStroke();
+  fill(base);
+  beginShape();
+  vertex(0, -130);
+  bezierVertex(100, -200, 220, -40, 0, 160);
+  bezierVertex(-220, -40, -100, -200, 0, -130);
+  endShape(CLOSE);
+
+  // Inner glow
+  fill(255, 100, 110, 100);
+  beginShape();
+  vertex(0, -110);
+  bezierVertex(70, -150, 140, -40, 0, 130);
+  bezierVertex(-140, -40, -70, -150, 0, -110);
+  endShape(CLOSE);
+
+  // Bright glow
+  fill(255, 200, 200, 60);
+  beginShape();
+  vertex(0, -135);
+  bezierVertex(105, -205, 225, -45, 0, 165);
+  bezierVertex(-225, -45, -105, -205, 0, -135);
+  endShape(CLOSE);
+
+  // Golden highlights
+  fill(255, 240, 150, 80);
+  ellipse(-50, -50, 30, 50);
+}
+
+// Reset
+function resetArtwork() {
+  artworkState = 'resetting';
+  resetButton.hide();
+
+  // Fade animation
+  let fadeProgress = 0;
+  let fadeInterval = setInterval(() => {
+    fadeProgress += 0.02;
+    background(0, 0, 0, fadeProgress * 255);
+
+    if (fadeProgress >= 1) {
+      clearInterval(fadeInterval);
+
+      // Reset all variables
+      tension = 0;
+      targetTension = 0;
+      heartScale = 1;
+      scatteredBeads = [];
+      transitionProgress = 0;
+      artworkState = 'oppressed';
+
+      // Switch assets back
+      if (ambientFreedom && ambientFreedom.isLoaded()) {
+        ambientFreedom.stop();
+      }
+      if (ambientOppressed && ambientOppressed.isLoaded()) {
+        ambientOppressed.loop();
+        ambientOppressed.setVolume(0.3);
+      }
+    }
+  }, 50);
+}
+
 function drawAmbientGlow() {
   push();
   translate(width / 2, height / 2);
@@ -91,7 +490,15 @@ function drawAmbientGlow() {
 }
 
 function mousePressed() {
-  targetTension = min(2.5, targetTension + 0.25);
+  if (artworkState === 'oppressed') {
+    targetTension = min(2.5, targetTension + 0.25);
+
+    // Play rope tightening sound
+    if (ropeSound && ropeSound.isLoaded() && tension > 0.5) {
+      ropeSound.play();
+      ropeSound.setVolume(0.4);
+    }
+  }
 }
 
 // --------- HEART --------- //
@@ -274,44 +681,130 @@ function drawRosary() {
 
 // --------- ANIMATION: ROSARY BREAKING --------- //
 let scatteredBeads = [];
+let fallingCross = null; // NEW: separate cross physics
+
 function drawBreakingRosary() {
   // initialize scattered beads once
   if (scatteredBeads.length === 0) {
     for (let i = 0; i < 50; i++) {
       let angle = random(TWO_PI);
       scatteredBeads.push({
-        x: 0,
-        y: 0,
+        x: random(-100, 100),
+        y: random(-80, 80),
         vx: cos(angle) * random(3, 10),
         vy: sin(angle) * random(3, 10) - 2,
         size: i % 6 === 0 ? 12 : 7,
-        life: 10.0
+        rotation: random(TWO_PI),
+        rotationSpeed: random(-0.2, 0.2)
       });
     }
+
+    fallingCross = {
+      x: 0,
+      y: 120,
+      vx: random(-2, 2),
+      vy: -3,
+      rotation: 0,
+      rotationSpeed: random(-0.15, 0.15)
+    };
   }
+
+  let elapsed = millis() - breakingStartTime;
+  let fadeProgress = map(elapsed, 0, 3000, 1, 0);
+  fadeProgress = constrain(fadeProgress, 0, 1);
 
   // draw and update scattering beads
   noStroke();
   for (let bead of scatteredBeads) {
     bead.x += bead.vx;
     bead.y += bead.vy;
-    bead.vy += 0.2; // gravity
-    bead.life -= 0.01;
+    bead.vy += 0.3; // gravity
+    bead.rotation += bead.rotationSpeed;
 
-    if (bead.life > 0) {
-      fill(217, 217, 217, bead.life * 255);
-      ellipse(bead.x, bead.y, bead.size, bead.size);
+    if (fadeProgress > 0) {
+      push();
+      translate(bead.x, bead.y);
+      rotate(bead.rotation);
+
+      // bead shadow
+      fill(50, 50, 50, fadeProgress * 200);
+      ellipse(2, 2, bead.size, bead.size);
+
+      // main bead
+      fill(217, 217, 217, fadeProgress * 255);
+      ellipse(0, 0, bead.size, bead.size);
+
+      // highlight
+      fill(255, fadeProgress * 150);
+      ellipse(-bead.size * 0.2, -bead.size * 0.2, bead.size * 0.3, bead.size * 0.3);
+      pop();
     }
   }
 
-  // cross falling
-  if (scatteredBeads[0].life > 0) {
+  // falling cross
+  if (fallingCross && fadeProgress > 0) {
+    fallingCross.x += fallingCross.vx;
+    fallingCross.y += fallingCross.vy;
+    fallingCross.vy += 0.3; // gravity - same as beads
+    fallingCross.rotation += fallingCross.rotationSpeed;
+
     push();
-    translate(0, 120);
-    rotate((1 - scatteredBeads[0].life) * TWO_PI);
-    fill(100, 100, 120, scatteredBeads[0].life * 255);
+    translate(fallingCross.x, fallingCross.y);
+    rotate(fallingCross.rotation);
+
+    // Cross shadow
+    fill(30, 30, 40, fadeProgress * 200);
+    rect(-3 + 2, -15 + 2, 6, 30);
+    rect(-10 + 2, -5 + 2, 20, 6);
+
+    // Cross base
+    fill(100, 100, 120, fadeProgress * 255);
     rect(-3, -15, 6, 30);
     rect(-10, -5, 20, 6);
+
+    // Cross highlight
+    fill(150, 150, 170, fadeProgress * 255);
+    rect(-2, -15, 2, 28);
+
     pop();
   }
+}
+
+// NEW: Healthy heart with alpha for fade-in
+function drawHealthyHeartWithAlpha(alpha) {
+  let base = color(255, 59, 71);
+
+  noStroke();
+  fill(red(base), green(base), blue(base), 255 * alpha);
+  beginShape();
+  vertex(0, -130);
+  bezierVertex(100, -200, 220, -40, 0, 160);
+  bezierVertex(-220, -40, -100, -200, 0, -130);
+  endShape(CLOSE);
+
+  // Inner glow
+  fill(255, 100, 110, 100 * alpha);
+  beginShape();
+  vertex(0, -110);
+  bezierVertex(70, -150, 140, -40, 0, 130);
+  bezierVertex(-140, -40, -70, -150, 0, -110);
+  endShape(CLOSE);
+
+  // Bright glow
+  fill(255, 200, 200, 60 * alpha);
+  beginShape();
+  vertex(0, -135);
+  bezierVertex(105, -205, 225, -45, 0, 165);
+  bezierVertex(-225, -45, -105, -205, 0, -135);
+  endShape(CLOSE);
+
+  // Golden highlights
+  fill(255, 240, 150, 80 * alpha);
+  ellipse(-50, -50, 30, 50);
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  // Reposition reset button on window resize
+  resetButton.position(10, 10);
 }
