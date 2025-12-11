@@ -5,7 +5,7 @@ function preload() {
     breakSound = loadSound('assets/break.mp3');
     myFont = loadFont('assets/deutsch.ttf');
   } catch (e) {
-    console.log('Sound files not loaded - continuing without assets');
+    console.log('Some assets not loaded - continuing without assets');
   }
 }
 
@@ -20,7 +20,7 @@ function setup() {
   resetButton.style('padding', '10px 20px');
   resetButton.style('font-size', '18px');
   resetButton.style('font-family', 'Helvetica');
-  resetButton.style('background-color', '#8a0022');
+  resetButton.style('background-color', 'rgba(210, 35, 47, 1)');
   resetButton.style('color', 'white');
   resetButton.style('border', 'none');
   resetButton.style('cursor', 'pointer');
@@ -42,12 +42,12 @@ let lastBeatTime = 0;
 let beatInterval = 2000;
 
 // states
-let artworkState = 'oppressed'; // 'oppressed', 'breaking', 'whiteFlash', 'fadeIn', 'freedom'
-let freedomTime = 0;
+let state = 'oppressed'; // 'oppressed', 'breaking', 'whiteFlash', 'fadeIn', 'freedom'
 let resetButton;
+let freedomTime = 0;
 let breakingStartTime = 0;
 let whiteFlashStart = 0;
-let fadeInStart = 0; // NEW: track fade in timing
+let fadeInStart = 0;
 
 // sound
 let heartbeatSound;
@@ -59,27 +59,27 @@ let myFont;
 
 function draw() {
   // Handle state transitions
-  if (artworkState === 'oppressed' || artworkState === 'breaking') {
+  if (state === 'oppressed' || state === 'breaking') {
     drawOppressedState();
-  } else if (artworkState === 'whiteFlash') {
+  } else if (state === 'whiteFlash') {
     drawWhiteFlash();
-  } else if (artworkState === 'fadeIn') {
+  } else if (state === 'fadeIn') {
     drawFadeIn();
-  } else if (artworkState === 'freedom') {
+  } else if (state === 'freedom') {
     drawFreedomState();
   }
 
   // instruction
-  if (artworkState === 'oppressed' || artworkState === 'breaking') {
+  if (state === 'oppressed' || state === 'breaking') {
     fill(255);
     textSize(48);
     textAlign(CENTER, CENTER);
     textFont(myFont);
-    text("Click mouse to break free", width / 2, height / 2 - 300);
+    text("Click mouse fast to break free", width / 2, height / 2 - 300);
   }
 
   // credits
-  fill(artworkState === 'freedom' || artworkState === 'fadeIn' ? 0 : 255);
+  fill(state === 'freedom' || state === 'fadeIn' ? 0 : 255);
   textAlign(LEFT, BASELINE);
   textFont('Helvetica');
   textSize(11);
@@ -91,7 +91,7 @@ function drawOppressedState() {
   background(bgBrightness, bgBrightness - 5, bgBrightness + 5);
 
   // Only update tension if not in breaking state
-  if (artworkState !== 'breaking') {
+  if (state !== 'breaking') {
     tension = lerp(tension, targetTension, 0.1);
     if (!mouseIsPressed) {
       targetTension = max(0, targetTension - 0.02);
@@ -99,8 +99,8 @@ function drawOppressedState() {
   }
 
   // Check if breaking threshold reached
-  if (tension > 2 && artworkState === 'oppressed') {
-    artworkState = 'breaking';
+  if (tension > 2 && state === 'oppressed') {
+    state = 'breaking';
     breakingStartTime = millis();
     scatteredBeads = [];
     fallingCross = null;
@@ -110,7 +110,7 @@ function drawOppressedState() {
   }
 
   // heartbeat timing based on tension
-  let effectiveTension = artworkState === 'breaking' ? 2 : tension;
+  let effectiveTension = state === 'breaking' ? 2 : tension;
   beatInterval = map(effectiveTension, 0, 2, 2000, 400);
 
   let currentTime = millis();
@@ -146,11 +146,11 @@ function drawOppressedState() {
   scale(heartScale);
   drawHeart();
 
-  if (artworkState === 'breaking') {
+  if (state === 'breaking') {
     drawBreakingRosary();
     // Wait 3 seconds then trigger white flash
     if (millis() - breakingStartTime > 3000) {
-      artworkState = 'whiteFlash';
+      state = 'whiteFlash';
       whiteFlashStart = millis();
     }
   } else {
@@ -159,7 +159,7 @@ function drawOppressedState() {
   pop();
 }
 
-// Simple white flash state
+// white fade out
 function drawWhiteFlash() {
   let elapsed = millis() - whiteFlashStart;
   let flashDuration = 1200; // Slightly shorter since we have fade-in now
@@ -173,7 +173,7 @@ function drawWhiteFlash() {
     background(255);
   } else {
     // Switch to fade-in state
-    artworkState = 'fadeIn';
+    state = 'fadeIn';
     fadeInStart = millis();
 
     // Switch ambient sound
@@ -187,7 +187,7 @@ function drawWhiteFlash() {
   }
 }
 
-// NEW: Gradual fade-in to freedom state
+// fade in transition
 function drawFadeIn() {
   let elapsed = millis() - fadeInStart;
   let fadeInDuration = 2000; // 2 seconds fade-in
@@ -251,7 +251,7 @@ function drawFadeIn() {
 
   // Transition complete
   if (progress >= 1) {
-    artworkState = 'freedom';
+    state = 'freedom';
     freedomTime = millis();
     resetButton.show();
   }
@@ -294,7 +294,7 @@ function drawFreedomState() {
   pop();
 }
 
-// NEW: Spiral rainbow rays (no red)
+// spiral rainbow rays
 function drawSpiralRainbowRays(alpha) {
   push();
   translate(width / 2, height / 2);
@@ -371,32 +371,10 @@ function drawFreedomGlow(alpha) {
   }
 
   // Inner bright glow
-  fill(255, 240, 200, (30 + sin(millis() * 0.002) * 10) * alpha);
+  fill(255, 240, 200, (80 + sin(millis() * 0.002) * 10) * alpha);
   ellipse(0, 0, 350, 350);
 
   pop();
-}
-
-function drawTransformingHeart(heartColor, progress) {
-  noStroke();
-  fill(heartColor);
-  beginShape();
-  vertex(0, -130);
-  bezierVertex(100, -200, 220, -40, 0, 160);
-  bezierVertex(-220, -40, -100, -200, 0, -130);
-  endShape(CLOSE);
-
-  // Glow
-  fill(red(heartColor), green(heartColor), blue(heartColor), 30 + progress * 30);
-  beginShape();
-  vertex(0, -135);
-  bezierVertex(105, -205, 225, -45, 0, 165);
-  bezierVertex(-225, -45, -105, -205, 0, -135);
-  endShape(CLOSE);
-
-  // Highlight
-  fill(255, 100 + progress * 100);
-  ellipse(-50, -50, 30, 50);
 }
 
 function drawHealthyHeart() {
@@ -434,7 +412,7 @@ function drawHealthyHeart() {
 
 // Reset
 function resetArtwork() {
-  artworkState = 'resetting';
+  state = 'resetting';
   resetButton.hide();
 
   // Fade animation
@@ -452,7 +430,7 @@ function resetArtwork() {
       heartScale = 1;
       scatteredBeads = [];
       transitionProgress = 0;
-      artworkState = 'oppressed';
+      state = 'oppressed';
 
       // Switch assets back
       if (ambientFreedom && ambientFreedom.isLoaded()) {
@@ -490,7 +468,7 @@ function drawAmbientGlow() {
 }
 
 function mousePressed() {
-  if (artworkState === 'oppressed') {
+  if (state === 'oppressed') {
     targetTension = min(2.5, targetTension + 0.25);
 
     // Play rope tightening sound
